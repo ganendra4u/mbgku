@@ -1,14 +1,68 @@
-name: Test Build
+name: Build TWRP Apollo (XZ2 Compact)
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
-      - name: Say hello
-        run: echo "Halo dunia"
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
 
-      - name: Cek disk
-        run: df -h
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential \
+            zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev \
+            lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+            python3 rsync bc lz4
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Init manifest
+        run: |
+          mkdir -p ~/twrp && cd ~/twrp
+          git config --global user.email "ci@build.local"
+          git config --global user.name "CI Build"
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 --depth=1
+
+      - name: Repo sync
+        run: |
+          cd ~/twrp
+          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
+
+      - name: Clone device tree
+        run: |
+          cd ~/twrp
+          git clone https://github.com/j4nn/android_device_sony_tama.git -b android-12.1 device/sony/tama
+          git clone https://github.com/minimal-manifest-twrp/android_device_common_version-info -b twrp-12.1 device/common/version-info
+
+      - name: Build recovery
+        run: |
+          cd ~/twrp
+          unset JAVAC JAVA_HOME LEX
+          export ALLOW_MISSING_DEPENDENCIES=true
+          source build/envsetup.sh
+          export USE_CUSTOM_VERSION=true
+          lunch twrp_apollo-userdebug
+          mka bootimage
+
+      - name: Upload recovery image
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp-apollo
+          path: ~/twrp/out/target/product/apollo/*.img
