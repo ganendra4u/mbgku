@@ -1,4 +1,4 @@
-name: Build TWRP Apollo (XZ2 Compact)
+name: Build TWRP xz2c (renamed from apollo)
 
 on:
   workflow_dispatch:
@@ -11,12 +11,19 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
-          swap-size-mb: 4096
+          root-reserve-mb: 4096
+          swap-size-mb: 2048
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
+          build-mount-path: /home/runner/work/_temp/build
+
+      - name: Setup build directory
+        run: |
+          sudo mkdir -p /home/runner/work/_temp/build/twrp
+          sudo chown -R runner:runner /home/runner/work/_temp/build
+          echo "BUILD_DIR=/home/runner/work/_temp/build/twrp" >> $GITHUB_ENV
 
       - name: Install deps
         run: |
@@ -35,34 +42,45 @@ jobs:
 
       - name: Init manifest
         run: |
-          mkdir -p ~/twrp && cd ~/twrp
+          mkdir -p $BUILD_DIR && cd $BUILD_DIR
           git config --global user.email "ci@build.local"
           git config --global user.name "CI Build"
           repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 --depth=1
 
       - name: Repo sync
         run: |
-          cd ~/twrp
+          cd $BUILD_DIR
           repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
 
       - name: Clone device tree
         run: |
-          cd ~/twrp
+          cd $BUILD_DIR
           git clone https://github.com/j4nn/android_device_sony_tama.git -b android-12.1 device/sony/tama
           git clone https://github.com/minimal-manifest-twrp/android_device_common_version-info -b twrp-12.1 device/common/version-info
 
+      - name: Rename apollo to xz2c
+        run: |
+          cd $BUILD_DIR/device/sony/tama
+          cp -r apollo xz2c
+          sed 's/apollo/xz2c/g; s/Apollo/Xz2c/g' twrp_apollo.mk > twrp_xz2c.mk
+          sed -i 's/apollo/xz2c/g' xz2c/*.mk 2>/dev/null || true
+          sed -i '/twrp_apollo/a\    twrp_xz2c-eng \\\n    twrp_xz2c-userdebug \\\n    twrp_xz2c-user' AndroidProducts.mk
+          echo "PRODUCT_MAKEFILES" | grep -q "twrp_apollo" AndroidProducts.mk && \
+          sed -i '/twrp_apollo\.mk/a\    $(LOCAL_DIR)\/twrp_xz2c.mk \\' AndroidProducts.mk
+          cat AndroidProducts.mk
+
       - name: Build recovery
         run: |
-          cd ~/twrp
+          cd $BUILD_DIR
           unset JAVAC JAVA_HOME LEX
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           export USE_CUSTOM_VERSION=true
-          lunch twrp_apollo-userdebug
+          lunch twrp_xz2c-userdebug
           mka bootimage
 
       - name: Upload recovery image
         uses: actions/upload-artifact@v4
         with:
-          name: twrp-apollo
-          path: ~/twrp/out/target/product/apollo/*.img
+          name: twrp-xz2c
+          path: ${{ env.BUILD_DIR }}/out/target/product/xz2c/*.img
