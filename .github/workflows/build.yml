@@ -58,7 +58,7 @@ jobs:
           git clone https://github.com/j4nn/android_device_sony_tama.git -b android-12.1 device/sony/tama
           git clone https://github.com/minimal-manifest-twrp/android_device_common_version-info -b twrp-12.1 device/common/version-info
 
-- name: Rename apollo to xz2c
+      - name: Rename apollo to xz2c
         run: |
           cd $BUILD_DIR/device/sony/tama
           cp -r apollo xz2c
@@ -122,3 +122,4 @@ jobs:
         with:
           name: twrp-xz2c
           path: ${{ env.BUILD_DIR }}/out/target/product/xz2c/*.img
+          
