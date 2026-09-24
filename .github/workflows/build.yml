@@ -55,7 +55,7 @@ jobs:
       - name: Clone device tree
         run: |
           cd $BUILD_DIR
-          git clone https://github.com/romiyusnandar/recovery_device_sony_tama.git -b android-12.1 device/sony/tama
+          git clone https://github.com/romiyusnandar/recovery_device_sony_tama.git -b 12.1 device/sony/tama
           git clone https://github.com/minimal-manifest-twrp/android_device_common_version-info -b twrp-12.1 device/common/version-info
           
       - name: Build recovery
