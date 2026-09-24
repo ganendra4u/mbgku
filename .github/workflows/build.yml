@@ -72,5 +72,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: twrp-apollo-dynamic
-          path: ${{ env.BUILD_DIR }}/out/target/product/xz2c/*.img
+          path: ${{ env.BUILD_DIR }}/out/target/product/apollo/*.img
           
