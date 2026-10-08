@@ -1,0 +1,45 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-14 lld-14 llvm-14 make git python3 \
+            bc flex bison ccache libelf-dev dwarves openssl libssl-dev perl zstd binutils \
+            libncurses-dev zip
+
+      - name: Setup clang toolchain
+        run: |
+          mkdir -p toolchains
+          rm -rf toolchains/clang
+          ln -s /usr/lib/llvm-14 toolchains/clang
+
+      - name: Build kernel
+        run: |
+          chmod +x build.sh
+          ./build.sh defconfig
+          ./build.sh build
+
+      - name: Create flashable ZIP
+        run: |
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/kernel/
+          cd AnyKernel3
+          zip -r ../Floppy_custom-ginkgo.zip . -x "*.git*"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Floppy_custom-ginkgo
+          path: Floppy_custom-ginkgo.zip
