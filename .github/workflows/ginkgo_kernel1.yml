@@ -67,10 +67,9 @@ jobs:
 
       - name: Debug
         run: |
-          grep -rn "security_initcall" kernel/include/asm-generic/vmlinux.lds.h kernel/arch/arm64/kernel/vmlinux.lds.S || echo "TIDAK ADA"
-          grep -n "CONFIG_SECURITY=" out/.config || true
-          grep -n "LTO\|CFI" out/.config || true
-          diff <(cd /tmp/upstream && cat include/asm-generic/vmlinux.lds.h) kernel/include/asm-generic/vmlinux.lds.h | head -40
+          git ls-remote --heads https://github.com/FlopKernel-Series/flop_trinket-mi_kernel
+          grep -n "SECURITY_INIT" kernel/arch/arm64/kernel/vmlinux.lds.S || echo "TIDAK ADA"
+          grep -n "^VERSION\|^PATCHLEVEL\|^SUBLEVEL" kernel/Makefile
 
       - name: Build kernel
         run: |
