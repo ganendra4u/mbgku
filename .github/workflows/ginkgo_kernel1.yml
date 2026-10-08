@@ -32,6 +32,28 @@ jobs:
           rm -rf toolchains/clang
           ln -s /usr/lib/llvm-14 toolchains/clang
 
+      - name: Add missing module-lto.lds
+        run: |
+          cat > kernel/scripts/module-lto.lds << 'EOF'
+          SECTIONS {
+          	.bss : {
+          		*(.bss .bss.[0-9a-zA-Z_]*)
+          		*(.bss..L*)
+          	}
+          	.data : {
+          		*(.data .data.[0-9a-zA-Z_]*)
+          		*(.data..L*)
+          	}
+          	.rodata : {
+          		*(.rodata .rodata.[0-9a-zA-Z_]*)
+          		*(.rodata..L*)
+          	}
+          	.text : {
+          		*(.text .text.[0-9a-zA-Z_]*)
+          	}
+          }
+          EOF
+
       - name: Build kernel
         run: |
           chmod +x build.sh
