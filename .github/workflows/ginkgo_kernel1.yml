@@ -59,17 +59,17 @@ jobs:
           rm -rf toolchains/clang
           mkdir -p toolchains
           git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchains/clang
-
+          
       - name: Fill missing files from upstream
         run: |
-          git clone --depth 1 https://github.com/FlopKernel-Series/flop_trinket-mi_kernel /tmp/upstream
+          git clone --depth 1 -b floppy-new-ginkgo https://github.com/FlopKernel-Series/flop_trinket-mi_kernel /tmp/upstream
           rsync -a --ignore-existing --exclude=.git /tmp/upstream/ kernel/
 
-      - name: Debug
+      - name: Patch vmlinux.lds.S
         run: |
-          git ls-remote --heads https://github.com/FlopKernel-Series/flop_trinket-mi_kernel
-          grep -n "SECURITY_INIT" kernel/arch/arm64/kernel/vmlinux.lds.S || echo "TIDAK ADA"
-          grep -n "^VERSION\|^PATCHLEVEL\|^SUBLEVEL" kernel/Makefile
+          f=kernel/arch/arm64/kernel/vmlinux.lds.S
+          grep -q SECURITY_INITCALL $f || sed -i 's/^\(\s*\)CON_INITCALL/&\n\1SECURITY_INITCALL/' $f
+          grep -n "INITCALL" $f
 
       - name: Build kernel
         run: |
