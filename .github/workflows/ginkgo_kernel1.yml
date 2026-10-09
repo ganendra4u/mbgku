@@ -71,6 +71,14 @@ jobs:
           grep -q SECURITY_INITCALL $f || sed -i 's/^\(\s*\)CON_INITCALL/&\n\1SECURITY_INITCALL/' $f
           grep -n "INITCALL" $f
 
+      - name: Debug
+        run: |
+          grep -E "^(VERSION|PATCHLEVEL|SUBLEVEL)" /tmp/upstream/Makefile
+          ls /tmp/upstream/arch/arm64/kernel/vdso/
+          ls kernel/arch/arm64/kernel/vdso/
+          echo "upstream .S: $(find /tmp/upstream -name '*.S' | wc -l)"
+          echo "kernel .S: $(find kernel -name '*.S' | wc -l)"
+
       - name: Build kernel
         run: |
           chmod +x build.sh
