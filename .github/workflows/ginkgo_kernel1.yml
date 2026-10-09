@@ -65,6 +65,10 @@ jobs:
           git clone --depth 1 -b floppy-new-ginkgo https://github.com/FlopKernel-Series/flop_trinket-mi_kernel /tmp/upstream
           rsync -a --ignore-existing --exclude=.git /tmp/upstream/ kernel/
 
+      - name: Sync vdso from upstream
+        run: |
+          rsync -a --delete /tmp/upstream/arch/arm64/kernel/vdso/ kernel/arch/arm64/kernel/vdso/
+
       - name: Patch vmlinux.lds.S
         run: |
           f=kernel/arch/arm64/kernel/vmlinux.lds.S
