@@ -59,11 +59,10 @@ jobs:
           rm -rf toolchains/clang
           mkdir -p toolchains
           git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchains/clang
-          
-      - name: Fill missing files from upstream
+
+      - name: Sync vdso from upstream
         run: |
-          git clone --depth 1 -b floppy-new-ginkgo https://github.com/FlopKernel-Series/flop_trinket-mi_kernel /tmp/upstream
-          rsync -a --ignore-existing --exclude=.git /tmp/upstream/ kernel/
+          rsync -a --delete /tmp/upstream/arch/arm64/kernel/vdso/ kernel/arch/arm64/kernel/vdso/
 
       - name: Sync vdso from upstream
         run: |
