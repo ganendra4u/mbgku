@@ -55,6 +55,7 @@ jobs:
 
       - name: Create flashable ZIP
         run: |
+          mkdir -p AnyKernel3/kernel
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/kernel/
           cd AnyKernel3
           zip -r ../Floppy_custom-ginkgo.zip . -x "*.git*"
