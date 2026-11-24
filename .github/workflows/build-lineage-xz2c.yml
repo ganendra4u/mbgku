@@ -1,0 +1,158 @@
+name: Build LineageOS 17.1 (Sony XZ2 Compact)
+
+on:
+  workflow_dispatch:
+    inputs:
+      LUNCH:
+        description: "Target lunch"
+        required: true
+        default: "lineage_xz2c-userdebug"
+      ROM_TARGET:
+        description: "Target make"
+        required: true
+        default: "bacon"
+      BUILD_TIMEOUT_MIN:
+        description: "Batas waktu build (menit). Sisakan waktu untuk simpan cache"
+        required: true
+        default: "280"
+      CLEAN_CCACHE:
+        description: "Hapus ccache lama? (true/false)"
+        required: true
+        default: "false"
+
+env:
+  ROM_DIR: ${{ github.workspace }}/rom
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_SIZE: 8G
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 355
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 12288
+          temp-reserve-mb: 1024
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+
+      - name: Show disk
+        run: |
+          df -h
+          free -h
+          nproc
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 libncurses5 libtinfo5 \
+            lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
+            libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+            python2 python3 rsync bc ccache lz4 cpio libssl-dev \
+            schedtool squashfs-tools pngcrush lzop ca-certificates
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          sudo apt-get clean
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Git config
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Restore ccache
+        if: ${{ inputs.CLEAN_CCACHE != 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-xz2c-${{ github.run_id }}
+          restore-keys: |
+            ccache-xz2c-
+
+      - name: Sync LineageOS source
+        run: |
+          mkdir -p $ROM_DIR && cd $ROM_DIR
+          repo init -u https://github.com/LineageOS/android.git -b lineage-17.1 --depth=1
+          for i in 1 2 3; do
+            repo sync -c -j8 --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune && break
+            echo "Sync gagal, coba lagi ($i)"; sleep 10
+          done
+          df -h .
+
+      - name: Clone device, kernel, vendor
+        run: |
+          cd $ROM_DIR
+          git clone --depth=1 https://github.com/LineageOS/android_kernel_sony_sdm845 -b lineage-17.1 kernel/sony/sdm845
+          git clone --depth=1 https://github.com/LineageOS/android_device_sony_xz2c -b lineage-17.1 device/sony/xz2c
+          git clone --depth=1 https://github.com/ganendra4u/android_device_sony_tama-common -b lineage-17.1 device/sony/tama-common
+          git clone --depth=1 https://github.com/LineageOS/android_hardware_sony_SonyOpenTelephony -b lineage-17.1 hardware/sony/SonyOpenTelephony
+          git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_apollo -b lineage-17.1 vendor/sony/xz2c
+          git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_tama-common -b lineage-17.1 vendor/sony/tama-common
+
+      - name: Build ROM
+        id: build
+        continue-on-error: true
+        run: |
+          cd $ROM_DIR
+          export LC_ALL=C
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(command -v ccache)
+          export CCACHE_COMPRESS=1
+          mkdir -p $CCACHE_DIR
+          ccache -M $CCACHE_SIZE
+          ccache -s
+
+          set +e
+          timeout ${{ inputs.BUILD_TIMEOUT_MIN }}m bash -c "
+            source build/envsetup.sh &&
+            lunch ${{ inputs.LUNCH }} &&
+            mka ${{ inputs.ROM_TARGET }} -j\$(nproc --all)
+          "
+          code=$?
+          if [ $code -eq 124 ]; then
+            echo "TIMEOUT: build belum selesai, jalankan workflow lagi (ccache dilanjutkan)."
+          fi
+          ccache -s
+          exit $code
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-xz2c-${{ github.run_id }}
+
+      - name: Check output
+        id: out
+        run: |
+          if ls $ROM_DIR/out/target/product/*/*.zip >/dev/null 2>&1; then
+            ls -lh $ROM_DIR/out/target/product/*/*.zip
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload ROM
+        if: steps.out.outputs.found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-xz2c-${{ github.run_number }}
+          path: |
+            ${{ env.ROM_DIR }}/out/target/product/*/lineage-*.zip
+            ${{ env.ROM_DIR }}/out/target/product/*/boot.img
+          if-no-files-found: warn
