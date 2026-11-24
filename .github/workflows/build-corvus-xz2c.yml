@@ -6,7 +6,7 @@ on:
       LUNCH:
         description: "Target lunch"
         required: true
-        default: "corvus_xz2c-userdebug"
+        default: "du_xz2c-userdebug"
       ROM_TARGET:
         description: "Target make (corvus / bacon-style: corvus)"
         required: true
