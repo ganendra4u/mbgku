@@ -14,7 +14,7 @@ on:
       BUILD_TIMEOUT_MIN:
         description: "Batas waktu build (menit). Sisakan waktu untuk simpan cache"
         required: true
-        default: "280"
+        default: "270"
       CLEAN_CCACHE:
         description: "Hapus ccache lama? (true/false)"
         required: true
@@ -34,9 +34,9 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 12288
+          root-reserve-mb: 20480
           temp-reserve-mb: 1024
-          swap-size-mb: 8192
+          swap-size-mb: 4096
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
@@ -113,7 +113,12 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(command -v ccache)
           export CCACHE_COMPRESS=1
-          mkdir -p $CCACHE_DIR
+
+          # Arahkan folder temp ke volume besar (bukan root)
+          export TMPDIR=${{ github.workspace }}/tmp
+          export CCACHE_TEMPDIR=${{ github.workspace }}/tmp/ccache
+          mkdir -p $TMPDIR $CCACHE_TEMPDIR $CCACHE_DIR
+
           ccache -M $CCACHE_SIZE
           ccache -s
 
@@ -122,13 +127,31 @@ jobs:
             source build/envsetup.sh &&
             lunch ${{ inputs.LUNCH }} &&
             mka ${{ inputs.ROM_TARGET }} -j\$(nproc --all)
-          "
-          code=$?
+          " 2>&1 | tee ${{ github.workspace }}/build.log
+          code=${PIPESTATUS[0]}
+
           if [ $code -eq 124 ]; then
             echo "TIMEOUT: build belum selesai, jalankan workflow lagi (ccache dilanjutkan)."
+          elif [ $code -ne 0 ]; then
+            echo "===== ERROR (FAILED:) ====="
+            grep -n -B2 -A30 -m3 -E "FAILED:|error:|Error " ${{ github.workspace }}/build.log | head -120
           fi
           ccache -s
           exit $code
+
+      - name: Disk usage after build
+        if: always()
+        run: |
+          df -h
+          sudo du -xh --max-depth=1 / 2>/dev/null | sort -h | tail -8
+
+      - name: Free root space before cache save
+        if: always()
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /tmp/* 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/tmp 2>/dev/null || true
+          df -h /
 
       - name: Save ccache
         if: always()
@@ -136,6 +159,15 @@ jobs:
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-xz2c-${{ github.run_id }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: ${{ github.workspace }}/build.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Check output
         id: out
