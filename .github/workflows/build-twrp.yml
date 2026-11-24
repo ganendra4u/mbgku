@@ -79,6 +79,16 @@ jobs:
           git clone --depth=1 -b ${{ inputs.DEVICE_BRANCH }} ${{ inputs.DEVICE_TREE }} ${{ inputs.DEVICE_PATH }}
           ls -la ${{ inputs.DEVICE_PATH }}
 
+      - name: Patch device tree
+        run: |
+          cd ~/twrp/${{ inputs.DEVICE_PATH }}
+          awk '
+          skip { if ($0 !~ /\\$/) skip=0; next }
+          /^PRODUCT_STATIC_BOOT_CONTROL_HAL/ { if ($0 ~ /\\$/) skip=1; next }
+          { print }' device.mk > device.mk.new
+          mv device.mk.new device.mk
+          grep -n "BOOT_CONTROL" device.mk || true
+
       - name: Build TWRP
         run: |
           cd ~/twrp
