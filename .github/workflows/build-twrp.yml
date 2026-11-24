@@ -22,11 +22,11 @@ on:
       LUNCH:
         description: "Target lunch (omni_tssi-eng untuk twrp-11, twrp_tssi-eng untuk twrp-12.1)"
         required: true
-        default: "omni_tssi-eng"
+        default: "twrp_tssi-eng"
       BUILD_TARGET:
         description: "Target build (recoveryimage / bootimage / vendorbootimage)"
         required: true
-        default: "recoveryimage"
+        default: "vendorbootimage"
 
 jobs:
   build:
@@ -82,12 +82,22 @@ jobs:
       - name: Patch device tree
         run: |
           cd ~/twrp/${{ inputs.DEVICE_PATH }}
+
+          # 1. Hapus BOOT_CONTROL_HAL yang obsolete
           awk '
           skip { if ($0 !~ /\\$/) skip=0; next }
           /^PRODUCT_STATIC_BOOT_CONTROL_HAL/ { if ($0 ~ /\\$/) skip=1; next }
           { print }' device.mk > device.mk.new
           mv device.mk.new device.mk
-          grep -n "BOOT_CONTROL" device.mk || true
+
+          # 2. Migrasi omni -> twrp
+          git mv omni_tssi.mk twrp_tssi.mk
+          sed -i 's/omni_tssi/twrp_tssi/g' AndroidProducts.mk twrp_tssi.mk vendorsetup.sh
+          sed -i 's#vendor/omni#vendor/twrp#g' twrp_tssi.mk
+          sed -i 's/PRODUCT_NAME := omni_tssi/PRODUCT_NAME := twrp_tssi/' twrp_tssi.mk
+
+          echo "=== twrp_tssi.mk ==="; cat twrp_tssi.mk
+          echo "=== AndroidProducts.mk ==="; cat AndroidProducts.mk
 
       - name: Build TWRP
         run: |
