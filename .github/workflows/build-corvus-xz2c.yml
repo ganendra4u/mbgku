@@ -1,4 +1,4 @@
-name: Build Corvus ROM (Sony XZ2 Compact)
+name: Build ROM (Sony XZ2 Compact)
 
 on:
   workflow_dispatch:
@@ -6,11 +6,11 @@ on:
       LUNCH:
         description: "Target lunch"
         required: true
-        default: "du_xz2c-userdebug"
+        default: "lineage_xz2c-userdebug"
       ROM_TARGET:
         description: "Target make (corvus / bacon-style: corvus)"
         required: true
-        default: "corvus"
+        default: "bacon"
       BUILD_TIMEOUT_MIN:
         description: "Batas waktu build (menit). Sisakan waktu untuk simpan cache"
         required: true
@@ -31,11 +31,12 @@ jobs:
     timeout-minutes: 355
 
     steps:
-      - name: Maximize build space
+    - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 4096
-          swap-size-mb: 16384
+          root-reserve-mb: 12288
+          temp-reserve-mb: 1024
+          swap-size-mb: 8192
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
@@ -85,7 +86,7 @@ jobs:
       - name: Sync Corvus source
         run: |
           mkdir -p $ROM_DIR && cd $ROM_DIR
-          repo init --depth=1 -u https://github.com/Corvus-ROM/android_manifest.git -b 10
+          repo init -u https://github.com/LineageOS/android.git -b lineage-17.1 --git-lfs --depth=1
           for i in 1 2 3; do
             repo sync -c -j8 --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune && break
             echo "Sync gagal, coba lagi ($i)"; sleep 10
@@ -96,7 +97,7 @@ jobs:
         run: |
           cd $ROM_DIR
           git clone --depth=1 https://github.com/LineageOS/android_kernel_sony_sdm845 -b lineage-17.1 kernel/sony/sdm845
-          git clone --depth=1 https://github.com/ganendra4u/android_device_sony_xz2c -b corvus-10 device/sony/xz2c
+          git clone --depth=1 https://github.com/LineageOS/android_device_sony_xz2c -b lineage-17.1 device/sony/xz2c
           git clone --depth=1 https://github.com/ganendra4u/android_device_sony_tama-common -b lineage-17.1 device/sony/tama-common
           git clone --depth=1 https://github.com/LineageOS/android_hardware_sony_SonyOpenTelephony -b lineage-17.1 hardware/sony/SonyOpenTelephony
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_apollo -b lineage-17.1 vendor/sony/xz2c
@@ -145,7 +146,7 @@ jobs:
         if: steps.out.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: Corvus-xz2c-${{ github.run_number }}
+          name: rom-xz2c-${{ github.run_number }}
           path: |
             ${{ env.ROM_DIR }}/out/target/product/xz2c/*.zip
             ${{ env.ROM_DIR }}/out/target/product/xz2c/boot.img
