@@ -23,11 +23,15 @@ on:
         description: "Hapus ccache lama? (true/false)"
         required: true
         default: "false"
+      SLIM_SOURCE:
+        description: "Hemat disk: hapus .repo objects dan prebuilts darwin/windows (true/false)"
+        required: true
+        default: "true"
 
 env:
   ROM_DIR: ${{ github.workspace }}/rom
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_SIZE: 6G
+  CCACHE_SIZE: 4G
 
 jobs:
   build:
@@ -38,7 +42,7 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
+          root-reserve-mb: 5120
           temp-reserve-mb: 1024
           swap-size-mb: 1024
           remove-dotnet: "true"
@@ -50,7 +54,7 @@ jobs:
       - name: Setup swap on big volume
         run: |
           sudo swapoff -a || true
-          sudo fallocate -l 6G ${{ github.workspace }}/swapfile
+          sudo fallocate -l 2G ${{ github.workspace }}/swapfile
           sudo chmod 600 ${{ github.workspace }}/swapfile
           sudo mkswap ${{ github.workspace }}/swapfile
           sudo swapon ${{ github.workspace }}/swapfile
@@ -111,6 +115,20 @@ jobs:
           git clone --depth=1 https://github.com/LineageOS/android_hardware_sony_SonyOpenTelephony -b lineage-17.1 hardware/sony/SonyOpenTelephony
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_apollo -b lineage-17.1 vendor/sony/xz2c
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_tama-common -b lineage-17.1 vendor/sony/tama-common
+          df -h .
+
+      - name: Slim source to save disk
+        if: ${{ inputs.SLIM_SOURCE == 'true' }}
+        run: |
+          cd $ROM_DIR
+          df -h .
+          # Objek git repo (tidak dibutuhkan saat build)
+          rm -rf .repo/project-objects .repo/projects
+          # Prebuilts untuk macOS/Windows (build ini di Linux)
+          for d in prebuilts/*/darwin-x86* prebuilts/*/*/darwin-x86* prebuilts/*/*/*/darwin-x86* \
+                   prebuilts/*/windows-x86* prebuilts/*/*/windows-x86* prebuilts/*/*/*/windows-x86*; do
+            [ -d "$d" ] && rm -rf "$d"
+          done
           df -h .
 
       - name: Build ROM
