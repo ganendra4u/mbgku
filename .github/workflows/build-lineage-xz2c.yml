@@ -11,8 +11,12 @@ on:
         description: "Target make"
         required: true
         default: "bacon"
+      JOBS:
+        description: "Jumlah job paralel (turunkan ke 3 kalau kena OOM)"
+        required: true
+        default: "4"
       BUILD_TIMEOUT_MIN:
-        description: "Batas waktu build (menit). Sisakan waktu untuk simpan cache"
+        description: "Batas waktu build (menit). Tes dulu pakai 20"
         required: true
         default: "270"
       CLEAN_CCACHE:
@@ -23,7 +27,7 @@ on:
 env:
   ROM_DIR: ${{ github.workspace }}/rom
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_SIZE: 8G
+  CCACHE_SIZE: 6G
 
 jobs:
   build:
@@ -34,19 +38,24 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 20480
+          root-reserve-mb: 8192
           temp-reserve-mb: 1024
-          swap-size-mb: 4096
+          swap-size-mb: 1024
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
           remove-codeql: "true"
           remove-docker-images: "true"
 
-      - name: Show disk
+      - name: Setup swap on big volume
         run: |
-          df -h
+          sudo swapoff -a || true
+          sudo fallocate -l 6G ${{ github.workspace }}/swapfile
+          sudo chmod 600 ${{ github.workspace }}/swapfile
+          sudo mkswap ${{ github.workspace }}/swapfile
+          sudo swapon ${{ github.workspace }}/swapfile
           free -h
+          df -h / ${{ github.workspace }}
           nproc
 
       - name: Install dependencies
@@ -102,6 +111,7 @@ jobs:
           git clone --depth=1 https://github.com/LineageOS/android_hardware_sony_SonyOpenTelephony -b lineage-17.1 hardware/sony/SonyOpenTelephony
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_apollo -b lineage-17.1 vendor/sony/xz2c
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_tama-common -b lineage-17.1 vendor/sony/tama-common
+          df -h .
 
       - name: Build ROM
         id: build
@@ -114,7 +124,7 @@ jobs:
           export CCACHE_EXEC=$(command -v ccache)
           export CCACHE_COMPRESS=1
 
-          # Arahkan folder temp ke volume besar (bukan root)
+          # Folder temp ke volume besar
           export TMPDIR=${{ github.workspace }}/tmp
           export CCACHE_TEMPDIR=${{ github.workspace }}/tmp/ccache
           mkdir -p $TMPDIR $CCACHE_TEMPDIR $CCACHE_DIR
@@ -122,13 +132,30 @@ jobs:
           ccache -M $CCACHE_SIZE
           ccache -s
 
+          # Pemantau disk dan RAM tiap 10 menit
+          (
+            while true; do
+              echo "----- MONITOR $(date +%H:%M) -----"
+              df -h / ${{ github.workspace }} | sed -n '1,3p'
+              free -m | sed -n '1,3p'
+              sleep 600
+            done
+          ) &
+          MON_PID=$!
+
           set +e
           timeout ${{ inputs.BUILD_TIMEOUT_MIN }}m bash -c "
             source build/envsetup.sh &&
             lunch ${{ inputs.LUNCH }} &&
-            mka ${{ inputs.ROM_TARGET }} -j\$(nproc --all)
+            mka ${{ inputs.ROM_TARGET }} -j${{ inputs.JOBS }}
           " 2>&1 | tee ${{ github.workspace }}/build.log
           code=${PIPESTATUS[0]}
+          kill $MON_PID 2>/dev/null
+
+          echo "===== Cek penyebab (disk / OOM) ====="
+          grep -n -i -m5 -E "No space left|Killed|out of memory|bad_alloc|Cannot allocate memory" ${{ github.workspace }}/build.log
+          sudo dmesg 2>/dev/null | grep -i -E "out of memory|killed process" | tail -5
+          df -h / ${{ github.workspace }}
 
           if [ $code -eq 124 ]; then
             echo "TIMEOUT: build belum selesai, jalankan workflow lagi (ccache dilanjutkan)."
@@ -139,19 +166,51 @@ jobs:
           ccache -s
           exit $code
 
-      - name: Disk usage after build
+      - name: Check output
+        id: out
         if: always()
         run: |
-          df -h
-          sudo du -xh --max-depth=1 / 2>/dev/null | sort -h | tail -8
+          if ls $ROM_DIR/out/target/product/*/*.zip >/dev/null 2>&1; then
+            ls -lh $ROM_DIR/out/target/product/*/*.zip
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Free root space before cache save
+      - name: Upload ROM
+        if: always() && steps.out.outputs.found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-xz2c-${{ github.run_number }}
+          path: |
+            ${{ env.ROM_DIR }}/out/target/product/*/lineage-*.zip
+            ${{ env.ROM_DIR }}/out/target/product/*/boot.img
+          if-no-files-found: warn
+
+      - name: Disk usage report
         if: always()
         run: |
+          df -h / ${{ github.workspace }}
+          du -h --max-depth=1 $ROM_DIR 2>/dev/null | sort -h | tail -8
+
+      - name: Free space before cache save
+        if: always()
+        run: |
+          # Hanya ccache yang disimpan, jadi folder out boleh dihapus
+          sudo rm -rf $ROM_DIR/out
+          sudo rm -rf ${{ github.workspace }}/tmp
+          sudo swapoff -a || true
+          sudo rm -f ${{ github.workspace }}/swapfile
           sudo apt-get clean
           sudo rm -rf /tmp/* 2>/dev/null || true
-          sudo rm -rf ${{ github.workspace }}/tmp 2>/dev/null || true
-          df -h /
+
+          # Pindahkan runner temp ke volume besar
+          BIG=${{ github.workspace }}/runner_tmp
+          sudo mkdir -p $BIG
+          sudo cp -a $RUNNER_TEMP/. $BIG/ || true
+          sudo chown -R runner:runner $BIG
+          sudo mount --bind $BIG $RUNNER_TEMP
+          df -h $RUNNER_TEMP / ${{ github.workspace }}
 
       - name: Save ccache
         if: always()
@@ -168,23 +227,3 @@ jobs:
           path: ${{ github.workspace }}/build.log
           if-no-files-found: ignore
           retention-days: 3
-
-      - name: Check output
-        id: out
-        run: |
-          if ls $ROM_DIR/out/target/product/*/*.zip >/dev/null 2>&1; then
-            ls -lh $ROM_DIR/out/target/product/*/*.zip
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Upload ROM
-        if: steps.out.outputs.found == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lineage-xz2c-${{ github.run_number }}
-          path: |
-            ${{ env.ROM_DIR }}/out/target/product/*/lineage-*.zip
-            ${{ env.ROM_DIR }}/out/target/product/*/boot.img
-          if-no-files-found: warn
