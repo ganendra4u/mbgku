@@ -12,9 +12,9 @@ on:
         required: true
         default: "bacon"
       JOBS:
-        description: "Jumlah job paralel (tanpa swap, turunkan kalau kena OOM)"
+        description: "Jumlah job paralel (kalau gagal otomatis dicoba lagi dengan 1 job)"
         required: true
-        default: "3"
+        default: "6"
       BUILD_TIMEOUT_MIN:
         description: "Batas waktu build (menit)"
         required: true
@@ -63,8 +63,9 @@ jobs:
             lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
             libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
             python2 python3 rsync bc ccache lz4 cpio libssl-dev \
-            schedtool squashfs-tools pngcrush lzop ca-certificates
+            schedtool squashfs-tools pngcrush lzop ca-certificates git-lfs
           sudo ln -sf /usr/bin/python2 /usr/bin/python
+          git lfs install
           sudo apt-get clean
 
       - name: Install repo tool
@@ -91,7 +92,7 @@ jobs:
       - name: Sync LineageOS source
         run: |
           mkdir -p $ROM_DIR && cd $ROM_DIR
-          repo init -u https://github.com/LineageOS/android.git -b lineage-17.1 --depth=1
+          repo init -u https://github.com/LineageOS/android.git -b lineage-17.1 --depth=1 --git-lfs
           for i in 1 2 3; do
             repo sync -c -j8 --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune && break
             echo "Sync gagal, coba lagi ($i)"; sleep 10
@@ -108,6 +109,22 @@ jobs:
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_apollo -b lineage-17.1 vendor/sony/xz2c
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_tama-common -b lineage-17.1 vendor/sony/tama-common
           df -h .
+
+      - name: Verify webview LFS file
+        run: |
+          cd $ROM_DIR/external/chromium-webview
+          APK=prebuilt/arm64/webview.apk
+          if head -c 200 $APK | grep -q "git-lfs"; then
+            echo "File masih berupa pointer LFS, tarik file aslinya..."
+            git lfs install --local
+            git lfs pull
+          fi
+          ls -lh $APK
+          SIZE=$(stat -c %s $APK)
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "::error::webview.apk masih terlalu kecil ($SIZE byte), LFS gagal ditarik"
+            exit 1
+          fi
 
       - name: Slim source and move to cache volume
         if: ${{ inputs.SLIM_SOURCE == 'true' }}
@@ -144,6 +161,12 @@ jobs:
           export CCACHE_COMPRESS=1
           export NINJA_ARGS="-l 4"
 
+          # Supaya cache terpakai lagi di run berikutnya
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_BASEDIR=$ROM_DIR
+          export CCACHE_NOHASHDIR=1
+          export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros
+
           # Folder out di root (volume besar), source di /cache
           export OUT_DIR_COMMON_BASE=${{ github.workspace }}/outbase
           mkdir -p $OUT_DIR_COMMON_BASE
@@ -155,6 +178,7 @@ jobs:
           mkdir -p $TMPDIR $CCACHE_TEMPDIR $CCACHE_DIR
 
           ccache -M $CCACHE_SIZE
+          ccache -z
           ccache -s
 
           # Pemantau disk dan RAM tiap 10 menit
@@ -171,12 +195,35 @@ jobs:
 
           echo 1000 > /proc/$$/oom_score_adj 2>/dev/null || true
           set +e
-          timeout ${{ inputs.BUILD_TIMEOUT_MIN }}m bash -c "
-            source build/envsetup.sh &&
-            lunch ${{ inputs.LUNCH }} &&
-            mka ${{ inputs.ROM_TARGET }} -j${{ inputs.JOBS }}
-          " 2>&1 | tee ${{ github.workspace }}/build.log
-          code=${PIPESTATUS[0]}
+          : > ${{ github.workspace }}/build.log
+
+          run_build() {
+            # $1 = jumlah job, $2 = batas waktu (menit)
+            timeout ${2}m bash -c "
+              source build/envsetup.sh &&
+              lunch ${{ inputs.LUNCH }} &&
+              mka ${{ inputs.ROM_TARGET }} -j$1
+            " 2>&1 | tee -a ${{ github.workspace }}/build.log
+            return ${PIPESTATUS[0]}
+          }
+
+          START=$SECONDS
+          run_build ${{ inputs.JOBS }} ${{ inputs.BUILD_TIMEOUT_MIN }}
+          code=$?
+
+          # Kalau gagal (bukan timeout), coba lagi sekali dengan 1 job.
+          # Ninja melanjutkan dari hasil sebelumnya, jadi cepat.
+          if [ $code -ne 0 ] && [ $code -ne 124 ]; then
+            echo "===== Build gagal (kode $code), error pertama: ====="
+            grep -n -B2 -A20 -m1 -E "FAILED:" ${{ github.workspace }}/build.log | head -60
+            LEFT=$(( ${{ inputs.BUILD_TIMEOUT_MIN }} - (SECONDS - START) / 60 ))
+            if [ $LEFT -gt 10 ]; then
+              echo "===== Coba lagi dengan 1 job (sisa waktu $LEFT menit) ====="
+              sleep 5
+              run_build 1 $LEFT
+              code=$?
+            fi
+          fi
           kill $MON_PID 2>/dev/null
 
           echo "===== Cek penyebab (disk / OOM) ====="
