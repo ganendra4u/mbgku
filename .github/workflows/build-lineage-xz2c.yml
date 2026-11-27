@@ -12,13 +12,13 @@ on:
         required: true
         default: "bacon"
       JOBS:
-        description: "Jumlah job paralel (turunkan ke 3 kalau kena OOM)"
+        description: "Jumlah job paralel (turunkan kalau kena OOM)"
         required: true
-        default: "4"
+        default: "6"
       BUILD_TIMEOUT_MIN:
-        description: "Batas waktu build (menit). Tes dulu pakai 20"
+        description: "Batas waktu build (menit)"
         required: true
-        default: "270"
+        default: "600"
       CLEAN_CCACHE:
         description: "Hapus ccache lama? (true/false)"
         required: true
@@ -35,32 +35,21 @@ env:
 
 jobs:
   build:
+    # Ganti "default" dengan nama profile yang kamu buat di Namespace
     runs-on: namespace-profile-masbudiganteng
-    timeout-minutes: 355
+    timeout-minutes: 720
 
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 5120
-          temp-reserve-mb: 1024
-          swap-size-mb: 1024
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
-          remove-docker-images: "true"
-
-      - name: Setup swap on big volume
+      - name: Show disk and setup swap
         run: |
-          sudo swapoff -a || true
-          sudo fallocate -l 2G ${{ github.workspace }}/swapfile
-          sudo chmod 600 ${{ github.workspace }}/swapfile
-          sudo mkswap ${{ github.workspace }}/swapfile
-          sudo swapon ${{ github.workspace }}/swapfile
+          df -h
           free -h
-          df -h / ${{ github.workspace }}
           nproc
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Install dependencies
         run: |
@@ -161,6 +150,7 @@ jobs:
           ) &
           MON_PID=$!
 
+          echo 1000 > /proc/$$/oom_score_adj 2>/dev/null || true
           set +e
           timeout ${{ inputs.BUILD_TIMEOUT_MIN }}m bash -c "
             source build/envsetup.sh &&
@@ -218,17 +208,8 @@ jobs:
           sudo rm -rf $ROM_DIR/out
           sudo rm -rf ${{ github.workspace }}/tmp
           sudo swapoff -a || true
-          sudo rm -f ${{ github.workspace }}/swapfile
-          sudo apt-get clean
-          sudo rm -rf /tmp/* 2>/dev/null || true
-
-          # Pindahkan runner temp ke volume besar
-          BIG=${{ github.workspace }}/runner_tmp
-          sudo mkdir -p $BIG
-          sudo cp -a $RUNNER_TEMP/. $BIG/ || true
-          sudo chown -R runner:runner $BIG
-          sudo mount --bind $BIG $RUNNER_TEMP
-          df -h $RUNNER_TEMP / ${{ github.workspace }}
+          sudo rm -f /swapfile
+          df -h
 
       - name: Save ccache
         if: always()
