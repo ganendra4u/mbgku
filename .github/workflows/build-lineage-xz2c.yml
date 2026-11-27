@@ -12,9 +12,9 @@ on:
         required: true
         default: "bacon"
       JOBS:
-        description: "Jumlah job paralel (turunkan kalau kena OOM)"
+        description: "Jumlah job paralel (tanpa swap, turunkan kalau kena OOM)"
         required: true
-        default: "6"
+        default: "5"
       BUILD_TIMEOUT_MIN:
         description: "Batas waktu build (menit)"
         required: true
@@ -40,16 +40,11 @@ jobs:
     timeout-minutes: 720
 
     steps:
-      - name: Show disk and setup swap
+      - name: Show disk
         run: |
           df -h
           free -h
           nproc
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
 
       - name: Install dependencies
         run: |
@@ -106,11 +101,11 @@ jobs:
           git clone --depth=1 https://github.com/ganendra4u/proprietary_vendor_sony_tama-common -b lineage-17.1 vendor/sony/tama-common
           df -h .
 
-      - name: Slim source to save disk
+      - name: Slim source and move to cache volume
         if: ${{ inputs.SLIM_SOURCE == 'true' }}
         run: |
           cd $ROM_DIR
-          df -h .
+          df -h / /cache
           # Objek git repo (tidak dibutuhkan saat build)
           rm -rf .repo/project-objects .repo/projects
           # Prebuilts untuk macOS/Windows (build ini di Linux)
@@ -118,7 +113,16 @@ jobs:
                    prebuilts/*/windows-x86* prebuilts/*/*/windows-x86* prebuilts/*/*/*/windows-x86*; do
             [ -d "$d" ] && rm -rf "$d"
           done
-          df -h .
+          du -sh $ROM_DIR
+          df -h / /cache
+
+          # Pindahkan source ke volume /cache, supaya root (95G) dipakai penuh untuk folder out
+          sudo mkdir -p /cache/rom
+          sudo chown -R $(id -u):$(id -g) /cache/rom
+          rsync -a --delete $ROM_DIR/ /cache/rom/
+          rm -rf $ROM_DIR
+          echo "ROM_DIR=/cache/rom" >> $GITHUB_ENV
+          df -h / /cache
 
       - name: Build ROM
         id: build
@@ -131,7 +135,12 @@ jobs:
           export CCACHE_EXEC=$(command -v ccache)
           export CCACHE_COMPRESS=1
 
-          # Folder temp ke volume besar
+          # Folder out di root (volume besar), source di /cache
+          export OUT_DIR_COMMON_BASE=${{ github.workspace }}/outbase
+          mkdir -p $OUT_DIR_COMMON_BASE
+
+          # Folder temp ke root
+
           export TMPDIR=${{ github.workspace }}/tmp
           export CCACHE_TEMPDIR=${{ github.workspace }}/tmp/ccache
           mkdir -p $TMPDIR $CCACHE_TEMPDIR $CCACHE_DIR
@@ -143,7 +152,7 @@ jobs:
           (
             while true; do
               echo "----- MONITOR $(date +%H:%M) -----"
-              df -h / ${{ github.workspace }} | sed -n '1,3p'
+              df -h / /cache | sed -n '1,4p'
               free -m | sed -n '1,3p'
               sleep 600
             done
@@ -163,7 +172,7 @@ jobs:
           echo "===== Cek penyebab (disk / OOM) ====="
           grep -n -i -m5 -E "No space left|Killed|out of memory|bad_alloc|Cannot allocate memory" ${{ github.workspace }}/build.log
           sudo dmesg 2>/dev/null | grep -i -E "out of memory|killed process" | tail -5
-          df -h / ${{ github.workspace }}
+          df -h / /cache
 
           if [ $code -eq 124 ]; then
             echo "TIMEOUT: build belum selesai, jalankan workflow lagi (ccache dilanjutkan)."
@@ -178,8 +187,8 @@ jobs:
         id: out
         if: always()
         run: |
-          if ls $ROM_DIR/out/target/product/*/*.zip >/dev/null 2>&1; then
-            ls -lh $ROM_DIR/out/target/product/*/*.zip
+          if ls ${{ github.workspace }}/outbase/rom/target/product/*/*.zip >/dev/null 2>&1; then
+            ls -lh ${{ github.workspace }}/outbase/rom/target/product/*/*.zip
             echo "found=true" >> $GITHUB_OUTPUT
           else
             echo "found=false" >> $GITHUB_OUTPUT
@@ -191,25 +200,23 @@ jobs:
         with:
           name: lineage-xz2c-${{ github.run_number }}
           path: |
-            ${{ env.ROM_DIR }}/out/target/product/*/lineage-*.zip
-            ${{ env.ROM_DIR }}/out/target/product/*/boot.img
+            ${{ github.workspace }}/outbase/rom/target/product/*/lineage-*.zip
+            ${{ github.workspace }}/outbase/rom/target/product/*/boot.img
           if-no-files-found: warn
 
       - name: Disk usage report
         if: always()
         run: |
-          df -h / ${{ github.workspace }}
-          du -h --max-depth=1 $ROM_DIR 2>/dev/null | sort -h | tail -8
+          df -h / /cache
+          du -h --max-depth=1 ${{ github.workspace }}/outbase/rom 2>/dev/null | sort -h | tail -8
 
       - name: Free space before cache save
         if: always()
         run: |
           # Hanya ccache yang disimpan, jadi folder out boleh dihapus
-          sudo rm -rf $ROM_DIR/out
+          sudo rm -rf ${{ github.workspace }}/outbase
           sudo rm -rf ${{ github.workspace }}/tmp
-          sudo swapoff -a || true
-          sudo rm -f /swapfile
-          df -h
+          df -h / /cache
 
       - name: Save ccache
         if: always()
