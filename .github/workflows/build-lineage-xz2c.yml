@@ -46,6 +46,15 @@ jobs:
           free -h
           nproc
 
+      - name: Check OS version
+        run: |
+          . /etc/os-release
+          echo "OS: $PRETTY_NAME"
+          if [ "$VERSION_ID" != "22.04" ] && [ "$VERSION_ID" != "20.04" ]; then
+            echo "::error::Runner pakai Ubuntu $VERSION_ID. Android 10 butuh Ubuntu 22.04. Ubah OS di profile Namespace."
+            exit 1
+          fi
+
       - name: Install dependencies
         run: |
           sudo apt-get update
