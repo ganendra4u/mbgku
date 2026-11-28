@@ -135,7 +135,7 @@ jobs:
           sed -i 's/-Wno-undefined-optimized//g' Makefile arch/arm64/Makefile
 
           # Source 4.9 butuh GNU as (integrated assembler clang tidak kompatibel).
-          # Clang memanggil "as" milik host (clang/bin/as) -> paksa lewat -B ke GNU as aarch64.
+          # Clang memanggil "as" milik host (clang/bin/as) -> paksa lewat -B (di CC, supaya lebih dulu dari --prefix milik Makefile).
           GNUBIN="$RUNNER_TEMP/gnubin"
           mkdir -p "$GNUBIN"
           AS_BIN="$(command -v aarch64-linux-gnu-as || true)"
@@ -150,7 +150,7 @@ jobs:
           # Fix: VDSO link pakai GNU ld ("unrecognised emulation mode: aarch64linux") -> pakai lld
           echo 'ccflags-y += -fuse-ld=lld' >> arch/arm64/kernel/vdso/Makefile
 
-          if ! make -j"$(nproc)" "${MAKE_ARGS[@]}" KCFLAGS="-B$GNUBIN" KAFLAGS="-B$GNUBIN" > build.log 2>&1; then
+          if ! make -j"$(nproc)" "${MAKE_ARGS[@]}" CC="clang -B$GNUBIN" > build.log 2>&1; then
             echo "::error::Build gagal. Error pertama:"
             grep -n -m5 -B3 -A6 -E "error:|Error [0-9]|undefined reference|\*\*\*" build.log | head -80
             exit 1
