@@ -81,7 +81,7 @@ jobs:
 
           MAKE_ARGS=(
             O=out ARCH=arm64
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
+            CC=clang "LD=ld.lld -m aarch64linux" AR=llvm-ar NM=llvm-nm
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
             HOSTCC=clang HOSTCXX=clang++
             CROSS_COMPILE=aarch64-linux-gnu-
