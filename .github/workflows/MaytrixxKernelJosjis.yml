@@ -1,0 +1,187 @@
+name: Build MaytrixxKernelJosjis (SDM845 + KSU)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: "Defconfig (cek di arch/arm64/configs)"
+        required: true
+        default: "tama_apollo_defconfig"
+      enable_ksu:
+        description: "Aktifkan KernelSU"
+        type: boolean
+        default: true
+      ksu_method:
+        description: "Metode hook KSU"
+        type: choice
+        options:
+          - syscall_table
+          - branch_link
+        default: syscall_table
+      enable_susfs:
+        description: "CONFIG_KSU_SUSFS=y (SusFS harus sudah ada di source)"
+        type: boolean
+        default: false
+      release:
+        description: "Upload ke GitHub Release"
+        type: boolean
+        default: false
+
+env:
+  KERNEL_NAME: MaytrixxKernelJosjis
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_sony_sdm845
+  KERNEL_BRANCH: lineage-17.1
+  KSU_SETUP: https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh
+  ARCH: arm64
+  TZ: Asia/Jakarta
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex git zip unzip \
+            libssl-dev libncurses5-dev libelf-dev lz4 python3 \
+            device-tree-compiler gcc-multilib g++-multilib lld
+
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
+
+      - name: Clone toolchain (Proton Clang)
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          echo "$GITHUB_WORKSPACE/clang/bin" >> "$GITHUB_PATH"
+
+      - name: Clone AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/ramdisk AnyKernel3/modules AnyKernel3/patch
+
+      - name: Integrate KernelSU
+        if: ${{ inputs.enable_ksu }}
+        working-directory: kernel
+        run: |
+          curl -LSs "$KSU_SETUP" | bash -
+
+      - name: Compile kernel
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          # Tampil di Settings > About phone > Kernel version (user@host)
+          export KBUILD_BUILD_USER="Maytrixx"
+          export KBUILD_BUILD_HOST="Josjis"
+
+          MAKE_ARGS=(
+            O=out ARCH=arm64
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+            HOSTCC=clang HOSTCXX=clang++
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+          )
+
+          make "${MAKE_ARGS[@]}" "${{ inputs.defconfig }}"
+
+          # Nama kernel -> uname -r jadi: 4.9.x-MaytrixxKernelJosjis
+          scripts/config --file out/.config \
+            --set-str LOCALVERSION "-${KERNEL_NAME}" \
+            -d LOCALVERSION_AUTO
+
+          if [ "${{ inputs.enable_ksu }}" = "true" ]; then
+            scripts/config --file out/.config -e KSU -e OVERLAY_FS
+            # KPROBES wajib off (hindari konflik hook)
+            scripts/config --file out/.config -d KPROBES -d KPROBE_EVENTS
+
+            if [ "${{ inputs.ksu_method }}" = "syscall_table" ]; then
+              scripts/config --file out/.config -e KSU_TAMPER_SYSCALL_TABLE -d KSU_HACK_ARM64_BRANCH_LINK
+            else
+              scripts/config --file out/.config -d KSU_TAMPER_SYSCALL_TABLE -e KSU_HACK_ARM64_BRANCH_LINK
+            fi
+
+            if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+              scripts/config --file out/.config -e KSU_SUSFS
+            fi
+          fi
+
+          make "${MAKE_ARGS[@]}" olddefconfig
+          grep -E "CONFIG_LOCALVERSION|CONFIG_KSU|CONFIG_KPROBES" out/.config || true
+
+          make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
+
+          echo "Kernel release: $(cat out/include/config/kernel.release)"
+
+      - name: Package flashable zip (AnyKernel3)
+        run: |
+          OUT=kernel/out/arch/arm64/boot
+          if [ -f "$OUT/Image.gz-dtb" ]; then
+            cp "$OUT/Image.gz-dtb" AnyKernel3/
+          elif [ -f "$OUT/Image.gz" ]; then
+            cp "$OUT/Image.gz" AnyKernel3/
+            cat "$OUT"/dts/*/*.dtb > AnyKernel3/dtb 2>/dev/null || true
+          else
+            cp "$OUT/Image" AnyKernel3/
+          fi
+
+          cat > AnyKernel3/anykernel.sh <<AK_EOF
+          ### AnyKernel3 Ramdisk Mod Script
+          properties() { '
+          kernel.string=${KERNEL_NAME}
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          block=boot;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          no_block_display=1;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          AK_EOF
+          sed -i 's/^          //' AnyKernel3/anykernel.sh
+
+          DATE=$(date +%Y%m%d-%H%M)
+          DEVICE="${{ inputs.defconfig }}"
+          DEVICE="${DEVICE%_defconfig}"
+          ZIP="${KERNEL_NAME}-${DEVICE}-${DATE}.zip"
+          (cd AnyKernel3 && zip -r9 "../$ZIP" . -x '.git*' '*.md')
+          echo "ZIP_NAME=$ZIP" >> "$GITHUB_ENV"
+          echo "TAG=build-${DATE}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+
+      - name: Upload build log (jika gagal)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel/build.log
+
+      - name: Release
+        if: ${{ inputs.release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: ${{ env.ZIP_NAME }}
