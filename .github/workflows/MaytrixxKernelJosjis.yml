@@ -73,6 +73,7 @@ jobs:
       - name: Compile kernel
         working-directory: kernel
         run: |
+          set -eo pipefail
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           # Tampil di Settings > About phone > Kernel version (user@host)
           export KBUILD_BUILD_USER="Maytrixx"
@@ -114,7 +115,11 @@ jobs:
           make "${MAKE_ARGS[@]}" olddefconfig
           grep -E "CONFIG_LOCALVERSION|CONFIG_KSU|CONFIG_KPROBES" out/.config || true
 
+          # Fix DTC "multiple definition of yylloc" (host compiler baru vs kernel 4.9)
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+
           make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
+          grep -m20 -E "error:|Error " build.log || true
 
           echo "Kernel release: $(cat out/include/config/kernel.release)"
 
@@ -178,6 +183,7 @@ jobs:
         with:
           name: build-log
           path: kernel/build.log
+          if-no-files-found: ignore
 
       - name: Release
         if: ${{ inputs.release }}
