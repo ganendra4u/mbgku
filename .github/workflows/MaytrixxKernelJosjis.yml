@@ -138,6 +138,10 @@ jobs:
           find drivers/staging/qcacld-3.0 \( -name Makefile -o -name Kbuild -o -name '*.mk' \) \
             -exec sed -i -E 's/-Werror( |$)/ /g' {} + 2>/dev/null || true
 
+          # Fix: -Werror di driver (qcacld dll) -> paksa -Wno-error di urutan paling akhir
+          echo 'c_flags += -Wno-error' >> scripts/Makefile.lib
+          echo 'a_flags += -Wno-error' >> scripts/Makefile.lib
+
           # Source 4.9 butuh GNU as (integrated assembler clang tidak kompatibel).
           # Clang memanggil "as" milik host (clang/bin/as) -> paksa lewat -B (di CC, supaya lebih dulu dari --prefix milik Makefile).
           GNUBIN="$RUNNER_TEMP/gnubin"
