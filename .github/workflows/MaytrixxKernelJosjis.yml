@@ -134,6 +134,9 @@ jobs:
           # Fix: flag clang lama tidak dikenal Proton Clang (unknown warning option)
           sed -i 's/-Wno-undefined-optimized//g' Makefile arch/arm64/Makefile
 
+          # Fix: "as: unrecognized option '-EL'" -> pakai integrated assembler clang
+          sed -i -E 's/-f?no-integrated-as//g' Makefile arch/arm64/Makefile
+
           make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
           grep -m20 -E "error:|Error " build.log || true
 
