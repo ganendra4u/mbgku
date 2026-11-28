@@ -131,6 +131,9 @@ jobs:
           # Fix DTC "multiple definition of yylloc" (host compiler baru vs kernel 4.9)
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
 
+          # Fix: flag clang lama tidak dikenal Proton Clang (unknown warning option)
+          sed -i 's/-Wno-undefined-optimized//g' Makefile arch/arm64/Makefile
+
           make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
           grep -m20 -E "error:|Error " build.log || true
 
