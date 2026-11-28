@@ -134,8 +134,15 @@ jobs:
           # Fix: flag clang lama tidak dikenal Proton Clang (unknown warning option)
           sed -i 's/-Wno-undefined-optimized//g' Makefile arch/arm64/Makefile
 
-          # Fix: "as: unrecognized option '-EL'" -> pakai integrated assembler clang
-          sed -i -E 's/-f?no-integrated-as//g' Makefile arch/arm64/Makefile
+          # Source 4.9 butuh GNU as (integrated assembler clang tidak kompatibel).
+          # Clang memanggil "as" polos -> arahkan ke GNU as untuk aarch64.
+          GNUBIN="$RUNNER_TEMP/gnubin"
+          mkdir -p "$GNUBIN"
+          AS_BIN="$(command -v aarch64-linux-gnu-as || true)"
+          [ -n "$AS_BIN" ] || { echo "::error::aarch64-linux-gnu-as tidak ada di toolchain"; ls "$GITHUB_WORKSPACE/clang/bin" | head -50; exit 1; }
+          ln -sf "$AS_BIN" "$GNUBIN/as"
+          export PATH="$GNUBIN:$PATH"
+          as --version | head -1
 
           # Fix: vdso "too many positional arguments" (integrated assembler)
           sed -i 's/clock_gettime_return, shift=1/clock_gettime_return shift=1/g' \
@@ -144,8 +151,11 @@ jobs:
           # Fix: VDSO link pakai GNU ld ("unrecognised emulation mode: aarch64linux") -> pakai lld
           echo 'ccflags-y += -fuse-ld=lld' >> arch/arm64/kernel/vdso/Makefile
 
-          make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
-          grep -m20 -E "error:|Error " build.log || true
+          if ! make -j"$(nproc)" "${MAKE_ARGS[@]}" > build.log 2>&1; then
+            echo "::error::Build gagal. Error pertama:"
+            grep -n -m5 -B3 -A6 -E "error:|Error [0-9]|undefined reference|\*\*\*" build.log | head -80
+            exit 1
+          fi
 
           echo "Kernel release: $(cat out/include/config/kernel.release)"
 
