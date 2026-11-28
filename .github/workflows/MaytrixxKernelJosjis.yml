@@ -142,6 +142,9 @@ jobs:
           echo 'c_flags += -Wno-error' >> scripts/Makefile.lib
           echo 'a_flags += -Wno-error' >> scripts/Makefile.lib
 
+          # Fix: lld "-shared and -pie may not be used together" saat link vmlinux
+          sed -i -E 's/-pie[[:space:]]+-shared/-pie/; s/-shared[[:space:]]+-pie/-pie/' arch/arm64/Makefile
+
           # Source 4.9 butuh GNU as (integrated assembler clang tidak kompatibel).
           # Clang memanggil "as" milik host (clang/bin/as) -> paksa lewat -B (di CC, supaya lebih dulu dari --prefix milik Makefile).
           GNUBIN="$RUNNER_TEMP/gnubin"
