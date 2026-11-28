@@ -6,7 +6,7 @@ on:
       defconfig:
         description: "Defconfig (cek di arch/arm64/configs)"
         required: true
-        default: "tama_apollo_defconfig"
+        default: "aosp_tama_akari_defconfig"
       enable_ksu:
         description: "Aktifkan KernelSU"
         type: boolean
@@ -89,12 +89,25 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu-
           )
 
+          echo "::group::Diagnosa toolchain"
+          clang --version | head -1
+          which aarch64-linux-gnu-gcc aarch64-linux-gnu-elfedit || true
+          echo 'int main(void){return 0;}' > /tmp/t.c
+          clang --target=aarch64-linux-gnu -fstack-protector-strong -c /tmp/t.c -o /tmp/t.o \
+            && echo "TEST COMPILE: OK" || echo "TEST COMPILE: GAGAL"
+          echo "::endgroup::"
+
           make "${MAKE_ARGS[@]}" "${{ inputs.defconfig }}"
 
           # Nama kernel -> uname -r jadi: 4.9.x-MaytrixxKernelJosjis
           scripts/config --file out/.config \
             --set-str LOCALVERSION "-${KERNEL_NAME}" \
             -d LOCALVERSION_AUTO
+
+          # Workaround error "-fstack-protector-strong not supported by compiler"
+          scripts/config --file out/.config \
+            -d CC_STACKPROTECTOR_STRONG -d CC_STACKPROTECTOR_REGULAR \
+            -e CC_STACKPROTECTOR_NONE
 
           if [ "${{ inputs.enable_ksu }}" = "true" ]; then
             scripts/config --file out/.config -e KSU -e OVERLAY_FS
