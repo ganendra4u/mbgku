@@ -1,29 +1,40 @@
-name: Build MaytrixxKernelJosjis (SDM845 + KSU)
+name: Build MaytrixxKernelJosjis
 
 on:
   workflow_dispatch:
     inputs:
       defconfig:
-        description: "Defconfig (cek di arch/arm64/configs)"
+        description: "Defconfig"
         required: true
-        default: "aosp_tama_akari_defconfig"
+        default: "tama_apollo_defconfig"
       enable_ksu:
-        description: "Aktifkan KernelSU"
+        description: "KernelSU"
         type: boolean
         default: true
       ksu_method:
-        description: "Metode hook KSU"
+        description: "hook KSU"
         type: choice
         options:
           - syscall_table
           - branch_link
         default: syscall_table
       enable_susfs:
-        description: "CONFIG_KSU_SUSFS=y (SusFS harus sudah ada di source)"
+        description: "CONFIG_KSU_SUSFS=y"
         type: boolean
         default: false
+      boot_block:
+        description: "Partition boot for anykernel"
+        default: "/dev/block/bootdevice/by-name/boot"
+      is_slot_device:
+        description: "Device A/B? (auto / 1 / 0)"
+        type: choice
+        options:
+          - auto
+          - "1"
+          - "0"
+        default: auto
       release:
-        description: "Upload ke GitHub Release"
+        description: "Upload GitHub"
         type: boolean
         default: false
 
@@ -202,8 +213,8 @@ jobs:
           supported.vendorpatchlevels=
           '; }
 
-          block=boot;
-          is_slot_device=auto;
+          block=${{ inputs.boot_block }};
+          is_slot_device=${{ inputs.is_slot_device }};
           ramdisk_compression=auto;
           patch_vbmeta_flag=auto;
           no_block_display=1;
