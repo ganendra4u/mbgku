@@ -137,6 +137,10 @@ jobs:
           # Fix: "as: unrecognized option '-EL'" -> pakai integrated assembler clang
           sed -i -E 's/-f?no-integrated-as//g' Makefile arch/arm64/Makefile
 
+          # Fix: vdso "too many positional arguments" (integrated assembler)
+          sed -i 's/clock_gettime_return, shift=1/clock_gettime_return shift=1/g' \
+            arch/arm64/kernel/vdso/gettimeofday.S
+
           make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
           grep -m20 -E "error:|Error " build.log || true
 
