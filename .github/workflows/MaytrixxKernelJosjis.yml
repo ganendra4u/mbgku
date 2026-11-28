@@ -141,6 +141,9 @@ jobs:
           sed -i 's/clock_gettime_return, shift=1/clock_gettime_return shift=1/g' \
             arch/arm64/kernel/vdso/gettimeofday.S
 
+          # Fix: VDSO link pakai GNU ld ("unrecognised emulation mode: aarch64linux") -> pakai lld
+          echo 'ccflags-y += -fuse-ld=lld' >> arch/arm64/kernel/vdso/Makefile
+
           make -j"$(nproc)" "${MAKE_ARGS[@]}" 2>&1 | tee build.log
           grep -m20 -E "error:|Error " build.log || true
 
