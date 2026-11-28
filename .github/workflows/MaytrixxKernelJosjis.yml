@@ -109,6 +109,9 @@ jobs:
             -d CC_STACKPROTECTOR_STRONG -d CC_STACKPROTECTOR_REGULAR \
             -e CC_STACKPROTECTOR_NONE
 
+          # Fix lld: "can't create dynamic relocation R_AARCH64_ABS64" -> build non-PIE (tanpa KASLR)
+          scripts/config --file out/.config -d RANDOMIZE_BASE -d RELOCATABLE
+
           if [ "${{ inputs.enable_ksu }}" = "true" ]; then
             scripts/config --file out/.config -e KSU -e OVERLAY_FS
             # KPROBES wajib off (hindari konflik hook)
@@ -144,6 +147,8 @@ jobs:
 
           # Fix: lld "-shared and -pie may not be used together" saat link vmlinux
           sed -i -E 's/-pie[[:space:]]+-shared/-pie/; s/-shared[[:space:]]+-pie/-pie/' arch/arm64/Makefile
+
+          echo 'LDFLAGS_vmlinux += -z notext' >> arch/arm64/Makefile
 
           # Source 4.9 butuh GNU as (integrated assembler clang tidak kompatibel).
           # Clang memanggil "as" milik host (clang/bin/as) -> paksa lewat -B (di CC, supaya lebih dulu dari --prefix milik Makefile).
