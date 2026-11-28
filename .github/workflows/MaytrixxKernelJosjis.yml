@@ -1,4 +1,4 @@
-name: Build MaytrixxKernelJosjis
+name: Build MaytrixxKernelJosjis (SDM845 + KSU)
 
 on:
   workflow_dispatch:
@@ -23,18 +23,18 @@ on:
         type: boolean
         default: false
       boot_block:
-        description: "Partition boot for anykernel"
+        description: "boot partition for anykernel"
         default: "/dev/block/bootdevice/by-name/boot"
       is_slot_device:
-        description: "Device A/B? (auto / 1 / 0)"
+        description: "Device A/B? yes=1"
         type: choice
         options:
           - auto
           - "1"
           - "0"
-        default: auto
+        default: "1"
       release:
-        description: "Upload GitHub"
+        description: "Upload GitHub Release"
         type: boolean
         default: false
 
